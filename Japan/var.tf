@@ -1,6 +1,6 @@
 #                                           Local Blocks
 locals {
-  EC2_SG_Traffic = aws_security_group.EC2_SG.id
+  # EC2_SG_Traffic = aws_security_group.EC2_SG.id
   db_instance_id = aws_db_instance.below_the_valley.id
   terradbname    = aws_db_instance.below_the_valley.tags["terraname"]
   ec2_ami_local  = data.aws_ami.amazon_linux.id
@@ -70,13 +70,13 @@ variable "db_username" {
 variable "sns_email" {
   description = "Put Your email below"
   type        = string
-  default     = "markedsync@gmail.com"
+  default     = "your@gmail.com"
   #Remember you have to confirm your subscription for this to work
 }
 variable "secret_location" {
   description = "The location in Secrets Manager to store the RDS credentials"
   type        = string
-  default     = "lab/rds/mysqv6"
+  default     = "lab/rds/mysqv11"
 }
 variable "parameter_location" {
   description = "The location in Parameter Store for some RDS details"

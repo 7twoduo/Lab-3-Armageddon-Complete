@@ -20,10 +20,16 @@ terraform {
     }
   }
 }
-
 provider "aws" {
-  alias  = "saopaulo"
+  region = "us-east-1"
+  alias = "useast"
+}
+provider "aws" {
   region = "sa-east-1"
+}
+provider "aws" {
+  region = "sa-east-1"
+  alias  = "saopaulo"
 }
 
 terraform {
@@ -138,16 +144,6 @@ resource "aws_route_table_association" "Secret" {
   route_table_id = aws_route_table.Private.id
 }
 
-#Security Groups
-# resource "aws_security_group" "RDS_SG" {
-#   name        = "RDS_SG"
-#   description = "Allow TLS inbound traffic from EC2_SG and outbound traffic to EC2_SG"
-#   vpc_id      = local.vpc_id
-
-#   tags = {
-#     Name = "RDS_SG"
-#   }
-# }
 resource "aws_security_group" "Endpoint_SG" {
   name        = "Endpoint_SG"
   description = "Endpoints traffic from 80,443"
@@ -188,13 +184,6 @@ resource "aws_vpc_security_group_ingress_rule" "allow_https_ipv4" {
   ip_protocol       = "tcp"
   to_port           = 443
 }
-# resource "aws_vpc_security_group_ingress_rule" "RDS_EC2_SG" {
-#   security_group_id            = aws_security_group.RDS_SG.id
-#   referenced_security_group_id = local.EC2_SG_Traffic
-#   from_port                    = 3306
-#   ip_protocol                  = "tcp"
-#   to_port                      = 3306
-# }
 resource "aws_vpc_security_group_ingress_rule" "allow_mysql_ipv4" {
   for_each = {
     uno = aws_security_group.EC2_SG.id
@@ -217,61 +206,33 @@ resource "aws_vpc_security_group_egress_rule" "allow_all_egress_ipv4" {
   ip_protocol       = "-1" # semantically equivalent to all ports
 }
 
-#Secret Manager to store RDS Credentials
-# resource "random_password" "master" {
-#   length           = 16
-#   special          = true
-#   override_special = "_!%^"
-# }
-
-#The Big Boy, RDS MySQL Instance
-# resource "aws_db_subnet_group" "my_db_subnet_group" {
-#   name       = "my-db-subnet-group"
-#   subnet_ids = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
-
-#   tags = {
-#     Name = "My DB subnet group"
-#   }
-# }
-# resource "aws_db_instance" "below_the_valley" {
-#   allocated_storage               = 10
-#   db_name                         = "labdb"
-#   engine                          = "mysql"
-#   engine_version                  = "8.0.43"
-#   instance_class                  = "db.t3.micro"
-#   username                        = var.db_username
-#   password                        = random_password.master.result
-#   parameter_group_name            = "default.mysql8.0"
-#   skip_final_snapshot             = true
-#   vpc_security_group_ids          = [aws_security_group.RDS_SG.id]
-#   db_subnet_group_name            = aws_db_subnet_group.my_db_subnet_group.name
-#   enabled_cloudwatch_logs_exports = ["error"]
-
-#   tags = {
-#     Name      = "My_RDS_Instance"
-#     terraname = "aws_db_instance.below_the_valley"
-#   }
-# }
-
-# resource "aws_secretsmanager_secret" "password" {
-#   name        = var.secret_location
-#   description = "RDS MySQL credentials for EC2 app"
-# }
-# resource "aws_secretsmanager_secret_version" "passwords" {
-#   secret_id = aws_secretsmanager_secret.password.id
-#   secret_string = jsonencode({
-#     username = var.db_username
-#     password = random_password.master.result
-#     port     = 3306
-#     host     = aws_db_instance.below_the_valley.address # Modification mistake cost me 6 hours of troubleshooting(Crazy Time Consumer)
-#     db_name  = aws_db_instance.below_the_valley.db_name
-#   })
-
-# }
 #                                                      EC2 Blocks
 #Identy and Access Management Role for EC2 to access RDS
+#Private Instance Subnet
 resource "aws_iam_role" "EC2_Role" {
   name = "EC2_Role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Sid    = ""
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      },
+    ]
+  })
+
+  tags = {
+    tag-key = "tag-value"
+  }
+}
+#For the Public Instance to download Sessions Manager
+resource "aws_iam_role" "EC2_Role2" {
+  name = "EC2_Role2"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -304,7 +265,7 @@ resource "aws_iam_policy" "secretsmanager_read_policy" {
         "Sid" : "ReadSpecificSecret",
         "Effect" : "Allow",
         "Action" : ["secretsmanager:GetSecretValue"],
-        "Resource" : "arn:aws:secretsmanager:var.aws_database_region:${data.aws_caller_identity.current.account_id}:secret:${var.secret_location}*" #Remember add a * or your policy will not work
+        "Resource" : "arn:aws:secretsmanager:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:secret:${var.secret_location}*" #Remember add a * or your policy will not work
       }
     ]
   })
@@ -325,7 +286,7 @@ resource "aws_iam_policy" "parameter_store_secrets" {
           "ssm:GetParametersByPath"
         ]
         Resource = [
-          "arn:aws:ssm:var.aws_database_region:${data.aws_caller_identity.current.account_id}:parameter${var.parameter_location}**"
+          "arn:aws:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter${var.parameter_location}**"
         ]
       }
     ]
@@ -347,7 +308,7 @@ resource "aws_iam_policy" "cloudwatch_least_priviege" {
           "logs:DescribeLogStreams"
         ]
         Resource = [
-          "${aws_cloudwatch_log_group.db_logs.arn}:*"  
+          "${aws_cloudwatch_log_group.star-alb-log1[0].arn}:*"
         ]
       }
     ]
@@ -374,6 +335,11 @@ resource "aws_iam_role_policy_attachment" "example_attachment2" {
   # SSM Managed Instance Core to allow SSM Session Manager access
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
+resource "aws_iam_role_policy_attachment" "public-ssm" {
+  role = aws_iam_role.EC2_Role2.name
+  # SSM Managed Instance Core to allow SSM Session Manager access
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
 #Associate the EC2 Instance with the Role to access the DB
 #Solution to EC2-RDS profile already exist
 
@@ -381,6 +347,11 @@ resource "aws_iam_instance_profile" "this" {
 
   name = var.ec2_instance_profile_name
   role = aws_iam_role.EC2_Role.name
+}
+resource "aws_iam_instance_profile" "second" {
+
+  name = var.ec2_instance_profile_name2
+  role = aws_iam_role.EC2_Role2.name
 }
 
 #                                            EC2 Instances Public & Private
@@ -392,12 +363,29 @@ resource "aws_instance" "lab-ec2-app-public" {
   security_groups             = [aws_security_group.EC2_SG.id]
   associate_public_ip_address = var.public_subnet
   user_data_base64            = base64encode(file("userdata.sh"))
+  iam_instance_profile        = aws_iam_instance_profile.second.name
+  # This is a new requirement for security that is coming up
+  metadata_options {
+    http_endpoint = "enabled" # Must be "enabled" to use IMDSv2
+    http_tokens   = "required" # Enforces the use of session tokens (IMDSv2)
+    http_put_response_hop_limit = 1 # The hop limit for PUT requests
+  }
+
+
+  #You definately need SSMCore to install session manager on instance so I will create a second profile just for this. Hours lost to a small misconfiguration
   #Do not associate IAM Role, it is more secure this way
 
 
   tags = {
     Name = "lab-ec2-app"
   }
+}
+
+resource "time_sleep" "wait_for_ami_settle" {
+  depends_on = [
+    aws_instance.lab-ec2-app-public   # or aws_ami, or aws_imagebuilder_image
+  ]
+  create_duration = "120s"
 }
 #Snapshot for Golden AMI Free Tier Eligible
 
@@ -406,7 +394,7 @@ resource "aws_ami_from_instance" "ec2_golden_ami" {
   source_instance_id = aws_instance.lab-ec2-app-public.id
 
   depends_on = [
-    aws_instance.lab-ec2-app-public
+    time_sleep.wait_for_ami_settle
   ]
 }
 
@@ -661,6 +649,7 @@ resource "aws_vpc_endpoint" "ssm" {
 resource "aws_s3_bucket" "spire" {
   bucket = "aws-alb-logs-${data.aws_region.current.region}-${local.Environment}-${data.aws_caller_identity.current.account_id}"
   region = data.aws_region.current.region
+  force_destroy = true # Auto-delete objects on terraform destroy
 
   tags = {
     Name        = "My bucket"
@@ -716,7 +705,7 @@ resource "aws_s3_bucket_policy" "lb_bucket_policy" {
 # Use if terraform doesn't return an identifier
 # import {
 #   to = aws_lb.hidden_alb
-#   id = "arn"
+#   id = "arn:aws:elasticloadbalancing:sa-east-1:814910273374:loadbalancer/app/LoadExternal/a0feb1c2369e5cdd"
 # }
 
 resource "aws_lb" "hidden_alb" {
@@ -729,11 +718,11 @@ resource "aws_lb" "hidden_alb" {
     aws_subnet.Star_Public_AZ1.id,
     aws_subnet.Star_Public_AZ2.id,
   ]
-  # access_logs {
-  #   bucket  = var.s3_bucket
-  #   prefix  = var.alb_access_logs_prefix
-  #   enabled = true
-  # }
+  access_logs {
+    bucket  = aws_s3_bucket.spire.id
+    prefix  = var.alb_access_logs_prefix
+    enabled = true
+  }
   tags = {
     Name = "App1LoadBalancer"
   }
@@ -742,6 +731,7 @@ resource "aws_lb" "hidden_alb" {
 #                                      DOMAIN NAME : ROUTE 53
 #############################################################################################
 #Target Group for Load Balancer
+
 resource "aws_lb_target_group" "hidden_target_group" {
   name     = "hidden-target-group"
   port     = 80 # You forgot the Port here
@@ -763,6 +753,7 @@ resource "aws_lb_target_group" "hidden_target_group" {
   }
 }
 #                                   Listeners for TARGET GROUP
+/*
 import {
   to = aws_route53domains_registered_domain.unshieldedhollow
   id = "unshieldedhollow.click" # Your domain here
@@ -848,36 +839,41 @@ resource "aws_acm_certificate_validation" "star_cert_validation1" {
   certificate_arn         = aws_acm_certificate.hidden_target_group2.arn
   validation_record_fqdns = [for r in aws_route53_record.cert_validation : r.fqdn]
 }
-
+*/
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.hidden_alb.arn
   port              = 80
   protocol          = "HTTP"
 
-  default_action {
-    type = "redirect"
-    redirect {
-      port        = "443"
-      protocol    = "HTTPS"
-      status_code = "HTTP_301"
-    }
-  }
-}
-resource "aws_lb_listener" "https" {
-  load_balancer_arn = aws_lb.hidden_alb.arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate.hidden_target_group2.arn
-
-
-
-  default_action {
+    default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.hidden_target_group.arn
   }
-  depends_on = [aws_acm_certificate_validation.star_cert_validation1]
+  # default_action {
+  #   type = "redirect"
+  #   redirect {
+  #     port        = "443"
+  #     protocol    = "HTTPS"
+  #     status_code = "HTTP_301"
+  #   }
+  # }
 }
+
+# resource "aws_lb_listener" "https" {
+#   load_balancer_arn = aws_lb.hidden_alb.arn
+#   port              = 443
+#   protocol          = "HTTPS"
+#   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+#   certificate_arn   = aws_acm_certificate.hidden_target_group2.arn
+
+
+
+#   default_action {
+#     type             = "forward"
+#     target_group_arn = aws_lb_target_group.hidden_target_group.arn
+#   }
+#   depends_on = [aws_acm_certificate_validation.star_cert_validation1]
+# }
 
 resource "aws_autoscaling_attachment" "load_asg" {
   autoscaling_group_name = aws_autoscaling_group.bar.id
@@ -889,6 +885,7 @@ resource "aws_wafv2_web_acl" "alb_waf" {
   name        = "alb_waf_defender"
   description = "This is to protect my application load balancer through WAF"
   scope       = "REGIONAL"
+  
 
   default_action {
     allow {}
@@ -1113,6 +1110,7 @@ resource "aws_s3_bucket" "star_waf_bucket_uno" {
   count = var.waf_log_dest == "s3" ? 1 : 0
 
   bucket = "aws-waf-logs-${data.aws_region.current.region}-${local.Environment}-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true # Auto-delete objects on terraform destroy
 
   tags = {
     Name = "${local.Environment}-waf-logs-bucket01"
@@ -1152,6 +1150,7 @@ resource "aws_s3_bucket" "star_firehouse_waf_log" {
   count = var.firehose_log == "firehose" ? 1 : 0
 
   bucket = "${data.aws_region.current.region}-${local.Environment}-waf-firehose-dest-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true # Auto-delete objects on terraform destroy
 
   tags = {
     Name = "${local.Environment}-waf-firehose-dest-bucket01"
@@ -1227,44 +1226,97 @@ resource "aws_wafv2_web_acl_logging_configuration" "chewbacca_waf_logging_fireho
 }
 
 
+
+
 #########################################################################
 #                       Transit Gateways
 #########################################################################
 
 locals {
-  japan_cidr_range = "10.200.0.0/15"
+  japan_cidr_range = "10.100.0.0/16" # Set it to the other region Cidr
 }
-# Explanation: Liberdade knows the way to Shinjuku—Tokyo CIDR routes go through the TGW corridor.
-resource "aws_route" "liberdade_to_tokyo_route01" {
-  count                  = sao_paulo_cidr_range == "10.200.0.0/16" ? 1 : 0
-  provider               = aws.saopaulo
-  route_table_id         = aws_route_table.Private.id
-  destination_cidr_block = local.japan_cidr_range
-  transit_gateway_id     = aws_ec2_transit_gateway.liberdade_tgw01.id
+#             Flip This to true when the necessary parts are created
+variable "transit_peering_enabled" {
+  description = "Enable when the other transit gateway is created"
+  type        = bool
+  default     = false
 }
-
-
 # Explanation: Liberdade is São Paulo’s Japanese town—local doctors, local compute, remote data.
 resource "aws_ec2_transit_gateway" "liberdade_tgw01" {
   provider    = aws.saopaulo
   description = "liberdade-tgw01 (Sao Paulo spoke)"
-  tags        = { Name = "liberdade-tgw01" }
+  # default_route_table_association = enabled
+  # default_route_table_propagation = enabled
+
+  tags = {
+  Name = "liberdade-tgw01" }
 }
+
+data "aws_ec2_transit_gateway_peering_attachment" "attachment" {
+  count  = var.transit_peering_enabled ? 1 : 0
+  region = "ap-northeast-1"
+  id = "tgw-attach-0951d33bd53517aed" # I think you know what this is
+}
+# Explanation: Liberdade knows the way to Shinjuku—Tokyo CIDR routes go through the TGW corridor.
+resource "aws_route" "liberdade_to_tokyo_route01" {
+  count                  = var.transit_peering_enabled ? 1 : 0
+  provider               = aws.saopaulo
+  route_table_id         = aws_route_table.Private.id
+  destination_cidr_block = local.japan_cidr_range
+  transit_gateway_id     = aws_ec2_transit_gateway.liberdade_tgw01.id
+
+  depends_on = [ aws_ec2_transit_gateway.liberdade_tgw01 ]
+}
+
+
+
 
 # Explanation: Liberdade accepts the corridor from Shinjuku—permissions are explicit, not assumed.
 resource "aws_ec2_transit_gateway_peering_attachment_accepter" "liberdade_accept_peer01" {
-  count                         = sao_paulo_cidr_range == "10.200.0.0/16" ? 1 : 0
+  count                         = var.transit_peering_enabled ? 1 : 0
   provider                      = aws.saopaulo
-  transit_gateway_attachment_id = aws_ec2_transit_gateway_peering_attachment.shinjuku_to_liberdade_peer01.id
-  tags                          = { Name = "liberdade-accept-peer01" }
+  transit_gateway_attachment_id = data.aws_ec2_transit_gateway_peering_attachment.attachment[0].id
+
+  tags = {
+  Name = "liberdade-accept-peer01" }
+
 }
 
 # Explanation: Liberdade attaches to its VPC—compute can now reach Tokyo legally, through the controlled corridor.
 resource "aws_ec2_transit_gateway_vpc_attachment" "liberdade_attach_sp_vpc01" {
-  count              = sao_paulo_cidr_range == "10.200.0.0/16" ? 1 : 0
+  count              = var.transit_peering_enabled ? 1 : 0
   provider           = aws.saopaulo
   transit_gateway_id = aws_ec2_transit_gateway.liberdade_tgw01.id
-  vpc_id             = aws_vpc.star.id
+  vpc_id             = aws_vpc.Star.id
   subnet_ids         = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
-  tags               = { Name = "liberdade-attach-sp-vpc01" }
+
+  tags = {
+  Name = "liberdade-attach-sp-vpc01" }
+}
+
+#############################              Route Table for TGW
+# This creates a static route that enables the transit gateway peering attachment to route to the other region
+# TGW Route Table in Region A
+resource "aws_ec2_transit_gateway_route_table" "rt_a" {
+  count  = var.transit_peering_enabled ? 1 : 0
+  transit_gateway_id = aws_ec2_transit_gateway.liberdade_tgw01.id
+  tags = {
+    Name = "tgw-rt-a"
+  }
+}
+# This code block gets the default route table
+data "aws_ec2_transit_gateway_route_table" "shinjuku_default" {
+  id = "tgw-rtb-0b2765e4b8e648175" # This is for the transit gateway ID so it changes the default Route tables, this is the easier solution
+
+  depends_on = [ aws_ec2_transit_gateway.liberdade_tgw01 ]
+}
+resource "aws_ec2_transit_gateway_route" "to_region_b_vpc" {
+  count  = var.transit_peering_enabled ? 1 : 0
+  transit_gateway_route_table_id = data.aws_ec2_transit_gateway_route_table.shinjuku_default.id
+  destination_cidr_block         = local.japan_cidr_range
+
+  # IMPORTANT: Use the peering attachment ID (requester resource ID is fine)
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_peering_attachment_accepter.liberdade_accept_peer01[0].id
+
+  # Ensure the accepter exists before routes are attempted
 }

@@ -168,7 +168,7 @@ resource "aws_security_group" "Endpoint_SG" {
 # }
 resource "aws_vpc_security_group_ingress_rule" "allow_http_ipv4" {
   for_each = {
-#    uno = aws_security_group.EC2_SG.id
+    #    uno = aws_security_group.EC2_SG.id
     dos = aws_security_group.Endpoint_SG.id
   }
   security_group_id = each.value
@@ -179,7 +179,7 @@ resource "aws_vpc_security_group_ingress_rule" "allow_http_ipv4" {
 }
 resource "aws_vpc_security_group_ingress_rule" "allow_https_ipv4" {
   for_each = {
-#    uno = aws_security_group.EC2_SG.id
+    #    uno = aws_security_group.EC2_SG.id
     dos = aws_security_group.Endpoint_SG.id
   }
   security_group_id = each.value
@@ -189,16 +189,16 @@ resource "aws_vpc_security_group_ingress_rule" "allow_https_ipv4" {
   to_port           = 443
 }
 resource "aws_vpc_security_group_ingress_rule" "RDS_EC2_SG" {
-  security_group_id            = aws_security_group.RDS_SG.id
-  referenced_security_group_id = local.EC2_SG_Traffic
-  from_port                    = 3306
-  ip_protocol                  = "tcp"
-  to_port                      = 3306
+  security_group_id = aws_security_group.RDS_SG.id
+  cidr_ipv4         = local.sao_paulo_cidr_range
+  from_port         = 3306
+  ip_protocol       = "tcp"
+  to_port           = 3306
 }
 resource "aws_vpc_security_group_ingress_rule" "allow_mysql_ipv4" {
   for_each = {
-#    uno = aws_security_group.EC2_SG.id
-    #dos = aws_security_group.Endpoint_SG.id
+    #    uno = aws_security_group.EC2_SG.id
+    dos = aws_security_group.Endpoint_SG.id
   }
   security_group_id = each.value
   cidr_ipv4         = var.public_access_cidr
@@ -209,7 +209,7 @@ resource "aws_vpc_security_group_ingress_rule" "allow_mysql_ipv4" {
 
 resource "aws_vpc_security_group_egress_rule" "allow_all_egress_ipv4" {
   for_each = {
-#    uno = aws_security_group.EC2_SG.id
+    uno = aws_security_group.RDS_SG.id
     dos = aws_security_group.Endpoint_SG.id
   }
   security_group_id = each.value
@@ -256,6 +256,9 @@ resource "aws_db_instance" "below_the_valley" {
 resource "aws_secretsmanager_secret" "password" {
   name        = var.secret_location
   description = "RDS MySQL credentials for EC2 app"
+  replica {
+    region = "sa-east-1"
+  }
 }
 resource "aws_secretsmanager_secret_version" "passwords" {
   secret_id = aws_secretsmanager_secret.password.id
@@ -266,6 +269,7 @@ resource "aws_secretsmanager_secret_version" "passwords" {
     host     = aws_db_instance.below_the_valley.address # Modification mistake cost me 6 hours of troubleshooting(Crazy Time Consumer)
     db_name  = aws_db_instance.below_the_valley.db_name
   })
+
 
 }
 
@@ -523,41 +527,92 @@ resource "aws_vpc_endpoint" "ssm" {
 #############################################################################################
 #                                     Transit Gateway
 ############################################################################################
- 
+
 locals {
-  sao_paulo_cidr_range = "10.200.0.0/15"
+  sao_paulo_cidr_range = "10.200.0.0/16" # Set it to the other region Cidr
+}
+variable "transit_peering_enabled" {
+  description = "Enable when the other transit gateway is created"
+  type        = bool
+  default     = false
+}
+
+
+
+
+# Explanation: Shinjuku Station is the hub—Tokyo is the data authority.
+resource "aws_ec2_transit_gateway" "shinjuku_tgw01" {
+  description                     = "shinjuku-tgw01 (Tokyo hub)"
+  default_route_table_association = "enable"
+  default_route_table_propagation = "enable"
+
+
+
+  tags = {
+  Name = "shinjuku-tgw01" }
 }
 
 # Explanation: Shinjuku returns traffic to Liberdade—because doctors need answers, not one-way tunnels.
 
 resource "aws_route" "shinjuku_to_sp_route01" {
-  count                  = sao_paulo_cidr_range == "10.200.0.0/16" ? 1 : 0
+  count                  = var.transit_peering_enabled ? 1 : 0
   route_table_id         = aws_route_table.Private.id
   destination_cidr_block = local.sao_paulo_cidr_range
   transit_gateway_id     = aws_ec2_transit_gateway.shinjuku_tgw01.id
 }
 
-
-# Explanation: Shinjuku Station is the hub—Tokyo is the data authority.
-resource "aws_ec2_transit_gateway" "shinjuku_tgw01" {
-  description = "shinjuku-tgw01 (Tokyo hub)"
-  tags        = { Name = "shinjuku-tgw01" }
-}
-
 # Explanation: Shinjuku connects to the Tokyo VPC—this is the gate to the medical records vault.
 resource "aws_ec2_transit_gateway_vpc_attachment" "shinjuku_attach_tokyo_vpc01" {
-  count                  = sao_paulo_cidr_range == "10.200.0.0/16" ? 1 : 0
+  count              = var.transit_peering_enabled ? 1 : 0
   transit_gateway_id = aws_ec2_transit_gateway.shinjuku_tgw01.id
-  vpc_id             = aws_vpc.chewbacca_vpc01.id
-  subnet_ids         = [aws_subnet.chewbacca_private_subnet01.id, aws_subnet.chewbacca_private_subnet02.id]
-  tags               = { Name = "shinjuku-attach-tokyo-vpc01" }
+  vpc_id             = aws_vpc.Star.id
+  subnet_ids         = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
+
+  tags = {
+  Name = "shinjuku-attach-tokyo-vpc01" }
+}
+data "aws_ec2_transit_gateway" "attachment" {
+  count  = var.transit_peering_enabled ? 1 : 0
+  region = "sa-east-1"
+  id     = "tgw-06b407b4ff0610b73"
+
 }
 
 # Explanation: Shinjuku opens a corridor request to Liberdade—compute may travel, data may not.
 resource "aws_ec2_transit_gateway_peering_attachment" "shinjuku_to_liberdade_peer01" {
-  count                  = sao_paulo_cidr_range == "10.200.0.0/16" ? 1 : 0
+  count                   = var.transit_peering_enabled ? 1 : 0
   transit_gateway_id      = aws_ec2_transit_gateway.shinjuku_tgw01.id
   peer_region             = "sa-east-1"
-  peer_transit_gateway_id = aws_ec2_transit_gateway.liberdade_tgw01.id # created in Sao Paulo module/state
-  tags                    = { Name = "shinjuku-to-liberdade-peer01" }
+  peer_transit_gateway_id = data.aws_ec2_transit_gateway.attachment[0].id # created in Sao Paulo module/state
+
+  tags = {
+  Name = "shinjuku-to-liberdade-peer01" }
 }
+
+#############################              Route Table for TGW
+# This creates a static route that enables the transit gateway peering attachment to route to the other region
+# TGW Route Table in Region A
+resource "aws_ec2_transit_gateway_route_table" "rt_a" {
+  count              = var.transit_peering_enabled ? 1 : 0
+  transit_gateway_id = aws_ec2_transit_gateway.shinjuku_tgw01.id
+  tags = {
+    Name = "tgw-rt-a"
+  }
+}
+# This code block gets the default route table
+data "aws_ec2_transit_gateway_route_table" "shinjuku_default" {
+  id = "tgw-rtb-089f741d2a9b8abf9" # Your Route table id, I will optimize this but later
+
+  depends_on = [aws_ec2_transit_gateway.shinjuku_tgw01]
+}
+resource "aws_ec2_transit_gateway_route" "to_region_b_vpc" {
+  count                          = var.transit_peering_enabled ? 1 : 0
+  transit_gateway_route_table_id = data.aws_ec2_transit_gateway_route_table.shinjuku_default.id
+  destination_cidr_block         = local.sao_paulo_cidr_range
+
+  # IMPORTANT: Use the peering attachment ID (requester resource ID is fine)
+  transit_gateway_attachment_id = aws_ec2_transit_gateway_peering_attachment.shinjuku_to_liberdade_peer01[0].id
+
+  # Ensure the accepter exists before routes are attempted
+}
+

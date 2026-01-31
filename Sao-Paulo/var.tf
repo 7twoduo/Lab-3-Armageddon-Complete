@@ -1,13 +1,13 @@
 #                                           Local Blocks
 locals {
   EC2_SG_Traffic = aws_security_group.EC2_SG.id
-  db_instance_id = aws_db_instance.below_the_valley.id
-  terradbname    = aws_db_instance.below_the_valley.tags["terraname"]
-  ec2_ami_local  = data.aws_ami.amazon_linux.id
-  vpc_id         = aws_vpc.Star.id
-  account_id     = data.aws_caller_identity.current.account_id
-  name_prefix    = var.Environment
-  Environment    = aws_vpc.Star.tags["Name"]
+  # db_instance_id = aws_db_instance.below_the_valley.id
+  # terradbname    = aws_db_instance.below_the_valley.tags["terraname"]
+  ec2_ami_local = data.aws_ami.amazon_linux.id
+  vpc_id        = aws_vpc.Star.id
+  account_id    = data.aws_caller_identity.current.account_id
+  name_prefix   = var.Environment
+  Environment   = aws_vpc.Star.tags["Name"]
 
 
 }
@@ -20,12 +20,12 @@ variable "Environment" {
 variable "aws_region" {
   description = "The AWS region to deploy resources in"
   type        = string
-  default     = "us-east-1"
+  default     = "sa-east-1"
 }
 variable "aws_database_region" {
   description = "This is the region where my database and all it's information is stored."
-  type = string
-  default = "ap-northeast-1"
+  type        = string
+  default     = "ap-northeast-1"
 }
 
 variable "public_subnet" {
@@ -82,7 +82,7 @@ variable "sns_email" {
 variable "secret_location" {
   description = "The location in Secrets Manager to store the RDS credentials"
   type        = string
-  default     = "lab/rds/mysqv6"
+  default     = "lab/rds/mysqv11"
 }
 variable "parameter_location" {
   description = "The location in Parameter Store for some RDS details"
@@ -113,6 +113,10 @@ variable "alb_domain_name" {
 variable "ec2_instance_profile_name" {
   type    = string
   default = "EC2_RDS"
+}
+variable "ec2_instance_profile_name2" {
+  type    = string
+  default = "EC2-ssm"
 }
 variable "enable_waf" {
   description = "Toggle WAF creation."
@@ -177,6 +181,11 @@ variable "cloudwatch_log_retention_days" {
   type        = string
   default     = "7"
 }
+variable "enable_cloudfront" {
+  description = "Toggle CloudFront CDN creation (Lab 2). When enabled, traffic flows through CloudFront to ALB with origin cloaking."
+  type        = bool
+  default     = true  # Set to true to enable Lab 2 CloudFront features
+}
 
 #                                           Data Blocks
 
@@ -187,22 +196,12 @@ data "aws_ami" "amazon_linux" {
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
-  }
-
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
   }
 
   filter {
     name   = "virtualization-type"
     values = ["hvm"]
-  }
-
-  filter {
-    name   = "root-device-type"
-    values = ["ebs"]
   }
 }
 
@@ -219,4 +218,7 @@ data "aws_availability_zones" "available" {
 #                  Output Blocks
 output "region" {
   value = data.aws_region.current.region
+}
+output "ami" {
+  value = data.aws_ami.amazon_linux.id
 }
