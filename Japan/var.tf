@@ -20,7 +20,12 @@ variable "Environment" {
 variable "aws_region" {
   description = "The AWS region to deploy resources in"
   type        = string
-  default     = "us-east-1"
+  default     = "ap-northeast-1"
+}
+variable "second_aws_region" {
+  description = "The AWS region to deploy resources in"
+  type        = string
+  default     = "sa-east-1"
 }
 variable "public_subnet" {
   description = "The AWS region to deploy resources in"
@@ -70,13 +75,13 @@ variable "db_username" {
 variable "sns_email" {
   description = "Put Your email below"
   type        = string
-  default     = "your@gmail.com"
+  default     = "markedsync@gmail.com"
   #Remember you have to confirm your subscription for this to work
 }
 variable "secret_location" {
   description = "The location in Secrets Manager to store the RDS credentials"
   type        = string
-  default     = "lab/rds/mysqv11"
+  default     = "lab/rds/mysqv16"
 }
 variable "parameter_location" {
   description = "The location in Parameter Store for some RDS details"
