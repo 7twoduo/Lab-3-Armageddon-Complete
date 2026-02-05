@@ -22,7 +22,7 @@ terraform {
 }
 
 provider "aws" {
-  region = "ap-northeast-1"
+  region = var.aws_region
 }
 
 
@@ -101,13 +101,17 @@ resource "aws_internet_gateway" "internet" {
   }
 }
 
-#Route Tables
+#                                   Route Tables
 resource "aws_route_table" "Public" {
   vpc_id = local.vpc_id
 
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.internet.id
+  }
+
+  tags = {
+    Name = "Public_Route"
   }
 }
 
@@ -117,9 +121,12 @@ resource "aws_route_table" "Private" {
     cidr_block = aws_vpc.Star.cidr_block
     gateway_id = "local" # Change to S3 Gateway Endpoint later// No S3 Gateway Automatically creates it's routes
   }
+  tags = {
+    Name = "Private_Route"
+  }
 }
 
-#Route table association
+#                                     Route table association
 resource "aws_route_table_association" "Known" {
   for_each = {
     uno = aws_subnet.Star_Public_AZ1.id
@@ -138,7 +145,7 @@ resource "aws_route_table_association" "Secret" {
   route_table_id = aws_route_table.Private.id
 }
 
-#Security Groups
+#                                       Security Groups
 resource "aws_security_group" "RDS_SG" {
   name        = "RDS_SG"
   description = "Allow TLS inbound traffic from EC2_SG and outbound traffic to EC2_SG"
@@ -157,18 +164,9 @@ resource "aws_security_group" "Endpoint_SG" {
     Name = "Endpoint_SG"
   }
 }
-# resource "aws_security_group" "EC2_SG" {
-#   name        = "EC2_SG"
-#   description = "Allow TLS inbound traffic on HTTP and RDP and all outbound traffic"
-#   vpc_id      = local.vpc_id
 
-#   tags = {
-#     Name = "EC2_SG"
-#   }
-# }
 resource "aws_vpc_security_group_ingress_rule" "allow_http_ipv4" {
   for_each = {
-    #    uno = aws_security_group.EC2_SG.id
     dos = aws_security_group.Endpoint_SG.id
   }
   security_group_id = each.value
@@ -179,7 +177,6 @@ resource "aws_vpc_security_group_ingress_rule" "allow_http_ipv4" {
 }
 resource "aws_vpc_security_group_ingress_rule" "allow_https_ipv4" {
   for_each = {
-    #    uno = aws_security_group.EC2_SG.id
     dos = aws_security_group.Endpoint_SG.id
   }
   security_group_id = each.value
@@ -189,15 +186,15 @@ resource "aws_vpc_security_group_ingress_rule" "allow_https_ipv4" {
   to_port           = 443
 }
 resource "aws_vpc_security_group_ingress_rule" "RDS_EC2_SG" {
+  count             = var.transit_peering_enabled ? 1 : 0
   security_group_id = aws_security_group.RDS_SG.id
-  cidr_ipv4         = local.sao_paulo_cidr_range
+  cidr_ipv4         = data.aws_vpc.foo[0].cidr_block
   from_port         = 3306
   ip_protocol       = "tcp"
   to_port           = 3306
 }
 resource "aws_vpc_security_group_ingress_rule" "allow_mysql_ipv4" {
   for_each = {
-    #    uno = aws_security_group.EC2_SG.id
     dos = aws_security_group.Endpoint_SG.id
   }
   security_group_id = each.value
@@ -217,14 +214,9 @@ resource "aws_vpc_security_group_egress_rule" "allow_all_egress_ipv4" {
   ip_protocol       = "-1" # semantically equivalent to all ports
 }
 
-#Secret Manager to store RDS Credentials
-resource "random_password" "master" {
-  length           = 16
-  special          = true
-  override_special = "_!%^"
-}
 
-#The Big Boy, RDS MySQL Instance
+
+#                                       The Big Boy, RDS MySQL Instance
 resource "aws_db_subnet_group" "my_db_subnet_group" {
   name       = "my-db-subnet-group"
   subnet_ids = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
@@ -252,12 +244,20 @@ resource "aws_db_instance" "below_the_valley" {
     terraname = "aws_db_instance.below_the_valley"
   }
 }
+#                           Secrets Manager
 
+#Secret Manager to store RDS Credentials
+resource "random_password" "master" {
+  length           = 16
+  special          = true
+  override_special = "_!%^"
+}
 resource "aws_secretsmanager_secret" "password" {
   name        = var.secret_location
   description = "RDS MySQL credentials for EC2 app"
   replica {
-    region = "sa-east-1"
+    # This replicates secret across regions
+    region = var.second_aws_region
   }
 }
 resource "aws_secretsmanager_secret_version" "passwords" {
@@ -276,50 +276,47 @@ resource "aws_secretsmanager_secret_version" "passwords" {
 #######################################################################################
 #                         Section 1B
 #######################################################################################
-
-resource "aws_ssm_parameter" "port" {
-  name        = "${var.parameter_location}port"
-  description = "This is the RDS port"
-  type        = "SecureString"
-  value       = 3306
-  tags = {
-    environment = "production"
-  }
-}
-resource "aws_ssm_parameter" "host" {
-  name        = "${var.parameter_location}host"
-  description = "This is the endpoint to the RDS instance"
-  type        = "SecureString"
-  value       = aws_db_instance.below_the_valley.address
-  tags = {
-    environment = "production"
-  }
-}
-resource "aws_ssm_parameter" "db_name" {
-  name        = "${var.parameter_location}db_name"
-  description = "This is the name of the database within the RDS instance"
-  type        = "SecureString"
-  value       = aws_db_instance.below_the_valley.db_name
-  tags = {
-    environment = "production"
-  }
-}
-
-#                                                                     Cloudwatch ALARM
-#Cloudwatch Logs to watch database and EC2 for any failures and Alert me
+#                             SSM Paramter Store
+# I don't need this and this service is expensive for a single consumer
+# resource "aws_ssm_parameter" "port" {
+#   name        = "${var.parameter_location}port"
+#   description = "This is the RDS port"
+#   type        = "SecureString"
+#   value       = 3306
+#   tags = {
+#     environment = "production"
+#   }
+# }
+# resource "aws_ssm_parameter" "host" {
+#   name        = "${var.parameter_location}host"
+#   description = "This is the endpoint to the RDS instance"
+#   type        = "SecureString"
+#   value       = aws_db_instance.below_the_valley.address
+#   tags = {
+#     environment = "production"
+#   }
+# }
+# resource "aws_ssm_parameter" "db_name" {
+#   name        = "${var.parameter_location}db_name"
+#   description = "This is the name of the database within the RDS instance"
+#   type        = "SecureString"
+#   value       = aws_db_instance.below_the_valley.db_name
+#   tags = {
+#     environment = "production"
+#   }
+# }
+#                                             Simple Notification Service
 resource "aws_sns_topic" "health_check_topic" {
   name = "ServiceHealthCheckTopic"
 }
 resource "aws_sns_topic_subscription" "email_subscription" {
   topic_arn = aws_sns_topic.health_check_topic.arn
   protocol  = "email"
-  # Replace with your email address
-  endpoint = var.sns_email
+  endpoint  = var.sns_email # Replace with your email address by changing the variable sns_email
   #Remember you have to confirm your subscription for this to work
 }
 
 #                                 Cloud Watch Alarms
-
 
 # Cloudwatch Log Group
 resource "aws_cloudwatch_log_group" "db_logs" {
@@ -364,12 +361,12 @@ resource "aws_cloudwatch_metric_alarm" "below_the_valley_db_alarm01" {
 resource "aws_cloudwatch_metric_alarm" "connection_failure_alarm" {
   alarm_name          = "High-DB-Connection-Failure-Rate"
   comparison_operator = "GreaterThanOrEqualToThreshold"
-  evaluation_periods  = 5
+  evaluation_periods  = 1
   metric_name         = aws_cloudwatch_log_metric_filter.connection_failure_filter.metric_transformation[0].name
   namespace           = "AWS/RDS"
   period              = 60 # Check every 60 seconds
   statistic           = "Average"
-  threshold           = 1 # Trigger if 5 or more failures in the period
+  threshold           = 3 # Trigger if 3 or more failures in the period
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.below_the_valley.identifier
   }
@@ -400,9 +397,8 @@ resource "aws_cloudwatch_metric_alarm" "rds-CPUUtilization" {
   depends_on = [aws_db_instance.below_the_valley]
 }
 
-#Use RDS Snapshots to restore RDS in case of failure
 
-
+#                                             VPC Endpoints
 
 #S3 Gateway VPC Endpoint for S3 access within the VPC
 resource "aws_vpc_endpoint" "s3_gateway_endpoint" {
@@ -428,114 +424,127 @@ resource "aws_vpc_endpoint" "logs" {
   private_dns_enabled = true
 
   tags = {
-    Name = "deathless-god-endpoint-cloudwatch-logs"
+    Name = "endpoint-cloudwatch-logs"
   }
 }
-
+# This stuff is expensive and unnecessary
 #Secrets Manager VPC Endpoint
-resource "aws_vpc_endpoint" "secrets_manager" {
-  vpc_id              = local.vpc_id
-  vpc_endpoint_type   = "Interface"
-  service_name        = "com.amazonaws.${data.aws_region.current.region}.secretsmanager"
-  subnet_ids          = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
-  security_group_ids  = [aws_security_group.Endpoint_SG.id]
-  private_dns_enabled = true
+# resource "aws_vpc_endpoint" "secrets_manager" {
+#   vpc_id              = local.vpc_id
+#   vpc_endpoint_type   = "Interface"
+#   service_name        = "com.amazonaws.${data.aws_region.current.region}.secretsmanager"
+#   subnet_ids          = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
+#   security_group_ids  = [aws_security_group.Endpoint_SG.id]
+#   private_dns_enabled = true
 
-  tags = {
-    Name = "SecretsManagerVPCEndpoint"
-  }
-}
+#   tags = {
+#     Name = "SecretsManagerVPCEndpoint"
+#   }
+# }
 
 #STS Endpoint, Theo doesn't mention it but this is necessary for EC2 to communicate with Secrets Manager
-resource "aws_vpc_endpoint" "sts" {
-  vpc_id              = local.vpc_id
-  vpc_endpoint_type   = "Interface"
-  service_name        = "com.amazonaws.${data.aws_region.current.region}.sts"
-  subnet_ids          = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
-  security_group_ids  = [aws_security_group.Endpoint_SG.id]
-  private_dns_enabled = true
+# resource "aws_vpc_endpoint" "sts" {
+#   vpc_id              = local.vpc_id
+#   vpc_endpoint_type   = "Interface"
+#   service_name        = "com.amazonaws.${data.aws_region.current.region}.sts"
+#   subnet_ids          = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
+#   security_group_ids  = [aws_security_group.Endpoint_SG.id]
+#   private_dns_enabled = true
 
-  tags = {
-    Name = "STSVPCEndpoint"
-  }
-}
+#   tags = {
+#     Name = "STSVPCEndpoint"
+#   }
+# }
 # KMS Endpoint
-resource "aws_vpc_endpoint" "kms" {
-  vpc_id            = local.vpc_id
-  vpc_endpoint_type = "Interface"
-  service_name      = "com.amazonaws.${data.aws_region.current.region}.kms"
-  subnet_ids = [
-    aws_subnet.Star_Private_AZ1.id,
-    aws_subnet.Star_Private_AZ2.id
-  ]
-  security_group_ids  = [aws_security_group.Endpoint_SG.id]
-  private_dns_enabled = true
+# resource "aws_vpc_endpoint" "kms" {
+#   vpc_id            = local.vpc_id
+#   vpc_endpoint_type = "Interface"
+#   service_name      = "com.amazonaws.${data.aws_region.current.region}.kms"
+#   subnet_ids = [
+#     aws_subnet.Star_Private_AZ1.id,
+#     aws_subnet.Star_Private_AZ2.id
+#   ]
+#   security_group_ids  = [aws_security_group.Endpoint_SG.id]
+#   private_dns_enabled = true
 
-  tags = {
-    Name = "KMS-VPCEndpoint"
-  }
-}
+#   tags = {
+#     Name = "KMS-VPCEndpoint"
+#   }
+# }
 
 # EC2 Messages VPC Endpoint
-resource "aws_vpc_endpoint" "ec2messages" {
-  # The service name format is "com.amazonaws.<region>.ec2messages"
-  service_name      = "com.amazonaws.${data.aws_region.current.region}.ec2messages"
-  vpc_id            = local.vpc_id
-  vpc_endpoint_type = "Interface"
-  # Associate the endpoint with your private subnet IDs
-  subnet_ids = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
-  # Associate the dedicated security group
-  security_group_ids = [aws_security_group.Endpoint_SG.id]
-  # Enable private DNS names for seamless resolution within the VPC
-  private_dns_enabled = true
+# resource "aws_vpc_endpoint" "ec2messages" {
+#   service_name        = "com.amazonaws.${data.aws_region.current.region}.ec2messages"
+#   vpc_id              = local.vpc_id
+#   vpc_endpoint_type   = "Interface"
+#   subnet_ids          = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
+#   security_group_ids  = [aws_security_group.Endpoint_SG.id]
+#   private_dns_enabled = true
 
-  tags = {
-    Name = "EC2Messages VPC Endpoint"
-  }
-}
+#   tags = {
+#     Name = "EC2Messages VPC Endpoint"
+#   }
+# }
 
-# SSM VPC Endpoint
-resource "aws_vpc_endpoint" "ssmmessages" {
-  vpc_id              = local.vpc_id
-  service_name        = "com.amazonaws.${data.aws_region.current.region}.ssmmessages"
-  vpc_endpoint_type   = "Interface"
-  security_group_ids  = [aws_security_group.Endpoint_SG.id]
-  subnet_ids          = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
-  private_dns_enabled = true
+# SSM Messages VPC Endpoint
+# resource "aws_vpc_endpoint" "ssmmessages" {
+#   vpc_id              = local.vpc_id
+#   service_name        = "com.amazonaws.${data.aws_region.current.region}.ssmmessages"
+#   vpc_endpoint_type   = "Interface"
+#   security_group_ids  = [aws_security_group.Endpoint_SG.id]
+#   subnet_ids          = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
+#   private_dns_enabled = true
 
-  tags = {
-    Name = "ssmmessages-endpoint"
-  }
-}
-resource "aws_vpc_endpoint" "ssm" {
-  vpc_id             = local.vpc_id
-  service_name       = "com.amazonaws.${data.aws_region.current.region}.ssm"
-  vpc_endpoint_type  = "Interface"
-  security_group_ids = [aws_security_group.Endpoint_SG.id]
-  subnet_ids = [
-    aws_subnet.Star_Private_AZ1.id,
-    aws_subnet.Star_Private_AZ2.id
-  ]
-  private_dns_enabled = true
+#   tags = {
+#     Name = "ssmmessages-endpoint"
+#   }
+# }
+# # SSM VPC Endpoint
+# resource "aws_vpc_endpoint" "ssm" {
+#   vpc_id             = local.vpc_id
+#   service_name       = "com.amazonaws.${data.aws_region.current.region}.ssm"
+#   vpc_endpoint_type  = "Interface"
+#   security_group_ids = [aws_security_group.Endpoint_SG.id]
+#   subnet_ids = [
+#     aws_subnet.Star_Private_AZ1.id,
+#     aws_subnet.Star_Private_AZ2.id
+#   ]
+#   private_dns_enabled = true
 
-  tags = {
-    Name = "ssm-endpoint"
-  }
-}
+#   tags = {
+#     Name = "ssm-endpoint"
+#   }
+# }
 
 
 #############################################################################################
 #                                     Transit Gateway
 ############################################################################################
 
-locals {
-  sao_paulo_cidr_range = "10.200.0.0/16" # Set it to the other region Cidr
-}
+
+#                                        Enable Transit gateway Peering Initialtion
+
+# Turn this on and add the other transit gateway id, I will try doing it with a datablock
 variable "transit_peering_enabled" {
   description = "Enable when the other transit gateway is created"
   type        = bool
   default     = false
 }
+
+locals {
+  count = var.transit_peering_enabled ? 1 : 0
+  # sao_paulo_cidr_range = data.aws_vpcs.foo.cidr_block[0] # "10.200.0.0/16"  Set it to the other region Cidr
+}
+# 
+data "aws_vpc" "foo" {
+  count  = var.transit_peering_enabled ? 1 : 0
+  region = "sa-east-1"
+  tags = {
+    Name = "star1"
+  }
+}
+
+
 
 
 
@@ -543,30 +552,20 @@ variable "transit_peering_enabled" {
 # Explanation: Shinjuku Station is the hub—Tokyo is the data authority.
 resource "aws_ec2_transit_gateway" "shinjuku_tgw01" {
   description                     = "shinjuku-tgw01 (Tokyo hub)"
-  default_route_table_association = "enable"
-  default_route_table_propagation = "enable"
-
-
-
+  default_route_table_association = "disable"
+  default_route_table_propagation = "disable"
   tags = {
   Name = "shinjuku-tgw01" }
 }
 
-# Explanation: Shinjuku returns traffic to Liberdade—because doctors need answers, not one-way tunnels.
-
-resource "aws_route" "shinjuku_to_sp_route01" {
-  count                  = var.transit_peering_enabled ? 1 : 0
-  route_table_id         = aws_route_table.Private.id
-  destination_cidr_block = local.sao_paulo_cidr_range
-  transit_gateway_id     = aws_ec2_transit_gateway.shinjuku_tgw01.id
-}
-
-# Explanation: Shinjuku connects to the Tokyo VPC—this is the gate to the medical records vault.
+# Connects Transit Gateway to VPC
 resource "aws_ec2_transit_gateway_vpc_attachment" "shinjuku_attach_tokyo_vpc01" {
-  count              = var.transit_peering_enabled ? 1 : 0
+  #  count              = var.transit_peering_enabled ? 1 : 0
   transit_gateway_id = aws_ec2_transit_gateway.shinjuku_tgw01.id
   vpc_id             = aws_vpc.Star.id
   subnet_ids         = [aws_subnet.Star_Private_AZ1.id, aws_subnet.Star_Private_AZ2.id]
+  appliance_mode_support = "enable"
+  dns_support            = "enable"
 
   tags = {
   Name = "shinjuku-attach-tokyo-vpc01" }
@@ -574,11 +573,14 @@ resource "aws_ec2_transit_gateway_vpc_attachment" "shinjuku_attach_tokyo_vpc01" 
 data "aws_ec2_transit_gateway" "attachment" {
   count  = var.transit_peering_enabled ? 1 : 0
   region = "sa-east-1"
-  id     = "tgw-06b407b4ff0610b73"
+  filter {
+    name   = "tag:Name"
+    values = ["liberdade-tgw01"]
+  }
 
 }
 
-# Explanation: Shinjuku opens a corridor request to Liberdade—compute may travel, data may not.
+# Connects Japan to Sao Paulo
 resource "aws_ec2_transit_gateway_peering_attachment" "shinjuku_to_liberdade_peer01" {
   count                   = var.transit_peering_enabled ? 1 : 0
   transit_gateway_id      = aws_ec2_transit_gateway.shinjuku_tgw01.id
@@ -586,33 +588,80 @@ resource "aws_ec2_transit_gateway_peering_attachment" "shinjuku_to_liberdade_pee
   peer_transit_gateway_id = data.aws_ec2_transit_gateway.attachment[0].id # created in Sao Paulo module/state
 
   tags = {
-  Name = "shinjuku-to-liberdade-peer01" }
+  Name = "shinjuku-to-liberdade-peer02" }
 }
 
-#############################              Route Table for TGW
-# This creates a static route that enables the transit gateway peering attachment to route to the other region
-# TGW Route Table in Region A
+
+#############################Future Optimization for better controlled process
 resource "aws_ec2_transit_gateway_route_table" "rt_a" {
-  count              = var.transit_peering_enabled ? 1 : 0
   transit_gateway_id = aws_ec2_transit_gateway.shinjuku_tgw01.id
   tags = {
     Name = "tgw-rt-a"
   }
 }
-# This code block gets the default route table
-data "aws_ec2_transit_gateway_route_table" "shinjuku_default" {
-  id = "tgw-rtb-089f741d2a9b8abf9" # Your Route table id, I will optimize this but later
 
-  depends_on = [aws_ec2_transit_gateway.shinjuku_tgw01]
+
+#                           Transit Gateway Asoociation
+resource "aws_ec2_transit_gateway_route_table_association" "vpc_assoc1" {
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.shinjuku_attach_tokyo_vpc01.id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.rt_a.id
+
 }
-resource "aws_ec2_transit_gateway_route" "to_region_b_vpc" {
+# Route propagation so traffic goes to VPC from Transit Gateway
+resource "aws_ec2_transit_gateway_route_table_propagation" "example" {
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_vpc_attachment.shinjuku_attach_tokyo_vpc01.id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.rt_a.id
+}
+#                      Route Table to 
+
+resource "aws_ec2_transit_gateway_route" "to_region_b_vpc1" {
   count                          = var.transit_peering_enabled ? 1 : 0
-  transit_gateway_route_table_id = data.aws_ec2_transit_gateway_route_table.shinjuku_default.id
-  destination_cidr_block         = local.sao_paulo_cidr_range
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.rt_a.id
+  destination_cidr_block         = aws_vpc.Star.cidr_block
 
   # IMPORTANT: Use the peering attachment ID (requester resource ID is fine)
-  transit_gateway_attachment_id = aws_ec2_transit_gateway_peering_attachment.shinjuku_to_liberdade_peer01[0].id
+  transit_gateway_attachment_id = aws_ec2_transit_gateway_vpc_attachment.shinjuku_attach_tokyo_vpc01.id
 
   # Ensure the accepter exists before routes are attempted
 }
 
+
+
+##################################################################################
+#########                  LAST STEP:ACTIVATE THIS AFTER EVERYTHING ELSE IS DONE
+##################################################################################
+
+variable "transit-peering-route" {
+  description = "Enable routing assocation to the peering transit gateway"
+  type        = bool
+  default     = false
+}
+resource "aws_ec2_transit_gateway_route" "to_region_b_vpc2" {
+  count                          = var.transit-peering-route ? 1 : 0
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.rt_a.id
+  destination_cidr_block         = data.aws_vpc.foo[0].cidr_block
+
+  # IMPORTANT: Use the peering attachment ID (requester resource ID is fine)
+  transit_gateway_attachment_id =  aws_ec2_transit_gateway_peering_attachment.shinjuku_to_liberdade_peer01[0].id
+
+  # Ensure the accepter exists before routes are attempted
+}
+
+
+# Run terraform apply for this to be added after you active the above variable
+resource "aws_ec2_transit_gateway_route_table_association" "vpc_assoc2" {
+  count                          = var.transit-peering-route ? 1 : 0
+  transit_gateway_attachment_id  = aws_ec2_transit_gateway_peering_attachment.shinjuku_to_liberdade_peer01[0].id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.rt_a.id
+}
+
+
+
+# Run terraform apply again for this route to get added to the route table, It is a fault of terraform and there isn't much that can be done
+
+resource "aws_route" "shinjuku_to_sp_route01" {
+  count                  = var.transit_peering_enabled ? 1 : 0
+  route_table_id         = aws_route_table.Private.id
+  destination_cidr_block = data.aws_vpc.foo[0].cidr_block
+  transit_gateway_id     = aws_ec2_transit_gateway.shinjuku_tgw01.id
+}
