@@ -34,8 +34,8 @@ I am assuming you did not do any of the previous labs so here is an explanation 
 
 
 
-Change the SNS EMAIL on both state files so you get the notificaiton.(Check the var file and find it there)
-Change the import route53 domain registered domain(Line 779) from my domain to your domain after you bought it from whatever source. We are doing this through aws so put the domain in route 53. It's not configured to use any other method.
+Change the SNS EMAIL on both state files so you get the notificaiton.(Check the var file and find it there).
+Change the import route53 domain registered domain(Line 779)(main.tf in Sao Paulo) from my domain to your domain after you bought it from whatever source. We are doing this through aws so put the domain in route 53. It's not configured to use any other method.
 
 Run terraform apply -auto-approve
 
