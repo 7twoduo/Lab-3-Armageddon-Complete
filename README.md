@@ -1,5 +1,5 @@
 # Lab-3
-                                HERE IS THE ARCHITECTURE
+                                                          HERE IS THE ARCHITECTURE
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/6f48bb3d-31cf-42f6-860d-5a81e82d6f41" />
 
 
@@ -20,12 +20,19 @@ Database in Japan (ap-northeast-1)
 
 
 
+
 Here is Lab 3 and here is how you will run it.
 
 First Thing
 I am assuming you did not do any of the previous labs so here is an explanation as to how this will work.
 
-HOW TO USE
+
+
+
+                                                                                                                        HOW TO USE
+
+
+
 
 Change the SNS EMAIL on both state files so you get the notificaiton.(Check the var file and find it there)
 Change the import route53 domain registered domain(Line 779) from my domain to your domain after you bought it from whatever source. We are doing this through aws so put the domain in route 53. It's not configured to use any other method.
@@ -50,9 +57,9 @@ If you destroy and recreate in the same region, you need to change the variable 
 That is how you use it.
 
 
-##########################################################################################################################################################################################################################################################################################################################
-
-##########################################################################################################################################################################################################################################################################################################################
+##############################################
+              MORE INFORMATION
+##############################################
 
 🏥 Lab 3 — Japan Medical
 Cross-Region Architecture with Legal Data Residency (APPI-Compliant)
