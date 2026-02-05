@@ -29,7 +29,7 @@ I am assuming you did not do any of the previous labs so here is an explanation 
 
 
 
-                                                                                                                        HOW TO USE
+   HOW TO USE
 
 
 
