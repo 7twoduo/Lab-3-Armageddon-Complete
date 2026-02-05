@@ -9,6 +9,3 @@ output "vpc_cidr" {
 output "Ec2_transit_gateway" {
   value = aws_ec2_transit_gateway.shinjuku_tgw01.id
 }
-# output "Ec2_transit_gateway" {
-#   value = aws_db_instance.below_the_valley.address
-# }
