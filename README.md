@@ -38,6 +38,7 @@ Change the SNS EMAIL on both state files so you get the notificaiton.(Check the 
 Change the import route53 domain registered domain(Line 779)(main.tf in Sao Paulo) from my domain to your domain after you bought it from whatever source. We are doing this through aws so put the domain in route 53. It's not configured to use any other method.
 
 Run terraform apply -auto-approve
+On both Japan and Sao Paulo
 
 After the apply, go to Japan, and at Transit Gateways at line 531, change it from false to true. This will initiate a tgw peering connection the the tgw in Sao Paulo.
 Run terraform apply -auto-approve on Japan's state file
