@@ -775,11 +775,11 @@ resource "aws_lb_target_group" "hidden_target_group" {
   }
 }
 #                                   Listeners for TARGET GROUP
-
-import {
-  to = aws_route53domains_registered_domain.unshieldedhollow
-  id = "unshieldedhollow.click" # Your domain here
-}
+# Use if LB doesn't give instance Identifier, it is a provider issue.
+#import {
+#  to = aws_route53domains_registered_domain.unshieldedhollow
+#  id = "unshieldedhollow.click" # Your domain here
+#}
 
 
 resource "aws_route53_zone" "primary" {
