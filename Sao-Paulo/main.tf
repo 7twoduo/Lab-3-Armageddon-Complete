@@ -725,10 +725,10 @@ resource "aws_s3_bucket_policy" "lb_bucket_policy" {
   })
 }
 # Use if terraform doesn't return an identifier
-import {
-  to = aws_lb.hidden_alb
-  id = "arn:aws:elasticloadbalancing:sa-east-1:814910273374:loadbalancer/app/LoadExternal/d990e1ab7e539256"
-}
+#import {
+#  to = aws_lb.hidden_alb
+#  id = "arn:aws:elasticloadbalancing:sa-east-1:814910273374:loadbalancer/app/LoadExternal/d990e1ab7e539256"
+#}
 
 resource "aws_lb" "hidden_alb" {
   name               = "LoadExternal"
